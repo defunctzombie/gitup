@@ -31,6 +31,8 @@ var destdir = process.argv[4];
 var restart_timeout;
 var restart_count = 0;
 
+var sauron = Sauron(destdir);
+
 (function reconnect() {
 
     if (!restart_timeout) {
@@ -74,17 +76,20 @@ var restart_count = 0;
         .pipe(stringify())
         .pipe(socket)
 
-        var sauron = Sauron(destdir);
-
         repos.on('update', function(repo) {
             install(repo.dir, function(err) {
                 sauron.restart();
             });
         });
 
+        var ping_interval = setInterval(function() {
+            socket.write(JSON.stringify({ type: 'ping' }) + '\n');
+        }, 1000 * 60);
+
         socket.write(JSON.stringify({ type: 'auth', secret: pass }) + '\n');
 
         socket.on('end', function() {
+            clearInterval(ping_interval);
             debug('closed control channel');
             reconnect();
         });
