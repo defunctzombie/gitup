@@ -1,0 +1,41 @@
+#!/usr/bin/env node
+
+var http = require('http');
+var args = require('commander');
+var debug = require('debug')('gitup');
+
+var Master = require('../master');
+
+args
+.option('--port [port]', 'port to listen')
+.option('--git-user [username]', 'username for git pushes, required if secret is specified')
+.option('--secret [passphrase]', 'require secret for git pushes and spoke connections')
+.parse(process.argv);
+
+if (!args.port) {
+    console.error('--port required');
+    return;
+}
+
+var master = Master({
+    gituser: args.gitUser,
+    secret: args.secret
+});
+
+var server = http.createServer(function (req, res) {
+    master.handle(req, res);
+});
+
+server.on('upgrade', function(req, socket, head) {
+    socket.write('HTTP/1.1 101 Web Socket Protocol Handshake\r\n' +
+                 'Upgrade: WebSocket\r\n' +
+                 'Connection: Upgrade\r\n' +
+                 '\r\n');
+    master.handleUpgrade(req, socket, head);
+});
+
+server.listen(args.port, function() {
+    debug('master listening');
+});
+
+// vim: ft=javascript

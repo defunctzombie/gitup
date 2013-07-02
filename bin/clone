@@ -1,0 +1,123 @@
+#!/usr/bin/env node
+
+// clone http://user:pass@hostname:port/repo dest   ... ?
+
+var url = require('url');
+var http = require('http');
+var spawn = require('child_process').spawn;
+
+var charsplit = require('char-split');
+var through = require('through');
+var debug = require('debug')('gitup');
+var log = require('bookrc');
+
+var parse = require('../lib/parse');
+var stringify = require('../lib/stringify');
+var repoman = require('../clone');
+var Sauron = require('../sauron');
+
+var uri = process.argv[3];
+var parsed = url.parse(uri);
+
+var auth = parsed.auth.split(':');
+var user = auth[0];
+var pass = auth[1];
+
+var host = parsed.hostname;
+var port = parsed.port;
+var reponame = parsed.path.replace(/^\//, '');
+var destdir = process.argv[4];
+
+var restart_timeout;
+var restart_count = 0;
+
+(function reconnect() {
+
+    if (!restart_timeout) {
+        restart_timeout = setTimeout(function() {
+            restart_count = 0;
+
+            restart_timeout = undefined;
+        }, 500);
+    }
+
+    if (restart_count++ >=5 ) {
+        throw new Error('restarting too fast');
+    }
+
+    var req = http.request({
+        port: parsed.port,
+        hostname: parsed.hostname,
+        headers: {
+            'Connection': 'Upgrade',
+            'Upgrade': 'websocket'
+        }
+    });
+
+    req.on('upgrade', function(res, socket, upgradeHead) {
+        debug('control channel established');
+
+        socket.setEncoding('utf8');
+
+        var repo_opt = {
+            gituri: 'uri',
+            reponame: reponame,
+            destdir: destdir
+        };
+
+        var repos = repoman(repo_opt);
+
+        socket
+        .pipe(charsplit())
+        .pipe(parse())
+        .pipe(repos)
+        .pipe(stringify())
+        .pipe(socket)
+
+        var sauron = Sauron(destdir);
+
+        repos.on('update', function(repo) {
+            install(repo.dir, function(err) {
+                sauron.restart();
+            });
+        });
+
+        socket.write(JSON.stringify({ type: 'auth', secret: pass }) + '\n');
+
+        socket.on('end', function() {
+            debug('closed control channel');
+            reconnect();
+        });
+
+        socket.on('error', function(err) {
+            log.error(err);
+            socket.end();
+            reconnect();
+        });
+    });
+
+    req.end();
+
+    req.on('error', function(err) {
+        log.error(err);
+        reconnect();
+    });
+})();
+
+function install(dir, cb) {
+    debug('installing %s', dir);
+
+    var opt = {
+        cwd: dir,
+        stdio: 'inherit'
+    };
+
+    var child = spawn('npm', ['install'], opt);
+
+    child.on('exit', function(code) {
+        debug('install process exited with code %d', code);
+        cb();
+    });
+};
+
+// vim: ft=javascript

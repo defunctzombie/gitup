@@ -1,0 +1,19 @@
+#!/usr/bin/env node
+
+var spawn = require('child_process').spawn;
+
+var cmd = process.argv[2];
+
+var subcmd = function(name) {
+    var opt = { stdio: 'inherit' };
+    spawn(__dirname + '/' + name, process.argv.splice(2), opt);
+}
+
+switch(cmd) {
+case 'clone':
+    return subcmd('clone');
+default:
+    return subcmd('master');
+}
+
+// vim: ft=javascript
